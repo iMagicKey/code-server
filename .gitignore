@@ -1,0 +1,14 @@
+# Credentials and private keys must never be committed
+*credentials*
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+
+# Local outputs and temporary files
+*.log
+*.tar.gz
+*.zip
+.DS_Store
+__pycache__/
