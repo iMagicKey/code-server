@@ -7,6 +7,8 @@ bash -n "$ROOT/install-code-server.sh"
 bash -n "$ROOT/code-server-manager"
 bash -n "$ROOT/tools/sync-manager.sh"
 bash -n "$ROOT/tests/validate.sh"
+bash -n "$ROOT/tests/test-health.sh"
+bash -n "$ROOT/tests/test-password.sh"
 
 python3 - "$ROOT" <<'PY'
 from pathlib import Path
@@ -39,3 +41,7 @@ for invalid in '--port 5' '--port NaN' '--workspace-dir ../unsafe' '--server-ip 
   fi
 done
 echo 'OK: help screen and invalid-option handling.'
+
+# The upstream health endpoint returns "expired" before any user activity.
+bash "$ROOT/tests/test-health.sh"
+bash "$ROOT/tests/test-password.sh"

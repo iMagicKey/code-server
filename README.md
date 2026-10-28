@@ -38,13 +38,13 @@ The default configuration needs **no input**:
 - Runs as **root**, listens on `0.0.0.0:15001` over HTTPS.
 - Creates `/srv/code-server` (versioned application), `/srv/workspaces` (project files), `/var/lib/code-server` (user data and extensions), and `/etc/code-server` (configuration).
 - Determines IPv4 automatically and creates a self-signed TLS certificate with the IP in its SAN.
-- Generates a random web-login password, stores the original in `/root/code-server-credentials.txt` (`0600`), and configures an Argon2id hash for authentication.
+- Generates a random web-login password and stores **only its Argon2id hash** in `/etc/code-server/config.yaml`. The password is displayed once at the end (including on a failed install after generation). **Save it immediately** in a password manager; no plaintext copy is written to disk.
 - Installs the **latest stable upstream release** for AMD64/ARM64, checking the SHA-256 digest published with that release.
 - Disables code-server telemetry and update polling. **Third-party extensions and executed tools may still send their own telemetry.**
 - Enables `code-server.service` and a daily `code-server-cert-renew.timer`.
 - Adds a UFW rule for the selected port **only if UFW is already active**, unless `--no-ufw` is given or loopback binding is selected. It does not enable UFW or modify cloud-provider firewalls.
 
-At the end, the installer displays the URL, password, and certificate SHA-256 fingerprint. Browsers will warn about the self-signed certificate until it is trusted; verifying the fingerprint out of band is recommended. Reissuing a certificate changes its fingerprint.
+At the end, the installer displays the URL, the **new password (once)**, and the certificate SHA-256 fingerprint. It cannot display the original password on a later run: reset it with `sudo code-server-manager reset-password` if lost. **Avoid capturing installation output in CI logs or shared terminal transcripts**, because the generated password is printed to the terminal. Browsers will warn about the self-signed certificate until it is trusted; verifying the fingerprint out of band is recommended.
 
 ## Custom installation options
 
@@ -86,7 +86,7 @@ When bound to `127.0.0.1`, the installer uses that IP in the self-signed certifi
 
 ### Re-running the installer
 
-Running the installer again **without flags** refreshes the installed management utility, preserves passwords, TLS certificates (unless renewal is required), application settings, existing projects, and the currently active code-server version. It will not change existing port, bind host, or project directory. To prevent silent misconfiguration, custom install flags are rejected after the first installation. For deliberate reconfiguration, edit the root-owned `/etc/code-server/config.yaml`, `/etc/code-server/manager.env`, and (if needed) the systemd unit, then reload systemd and restart the service; keep these files consistent.
+Running the installer again **without flags** refreshes the installed management utility, preserves the existing password hash, TLS certificates (unless renewal is required), application settings, existing projects, and the currently active code-server version. **The plaintext password cannot be displayed again.** It will not change existing port, bind host, or project directory. To prevent silent misconfiguration, custom install flags are rejected after the first installation. For deliberate reconfiguration, edit the root-owned `/etc/code-server/config.yaml`, `/etc/code-server/manager.env`, and (if needed) the systemd unit, then reload systemd and restart the service; keep these files consistent.
 
 ## Administration
 
@@ -97,6 +97,7 @@ sudo code-server-manager update                  # Upgrade to the latest stable 
 sudo code-server-manager update --version 4.143.1 # Install a specific stable version
 sudo code-server-manager rollback                # Switch to previous installed version
 sudo code-server-manager renew-cert              # Renew if IP changed or cert expires soon
+sudo code-server-manager reset-password          # Rotate password and display the new one once
 
 sudo systemctl status code-server
 sudo journalctl -u code-server -n 100 --no-pager
@@ -105,7 +106,7 @@ sudo systemctl status code-server-cert-renew.timer
 
 ### How updating works
 
-The manager fetches upstream release metadata, validates version and URL, downloads the archive, compares its SHA-256 digest to the upstream release asset metadata, extracts the version into an isolated directory, and atomically switches `/srv/code-server/current`. Then it restarts the service and checks the local HTTPS `/healthz` endpoint. If activation fails, it attempts to restore the previous version automatically.
+The manager fetches upstream release metadata, validates version and URL, downloads the archive, compares its SHA-256 digest to the upstream release asset metadata, extracts the version into an isolated directory, and atomically switches `/srv/code-server/current`. Then it restarts the service and checks the local HTTPS `/healthz` endpoint (`alive` and `expired` both indicate a responding server; `expired` simply means no recent editor activity). If activation fails, it attempts to restore the previous version automatically.
 
 Previous versions remain in `/srv/code-server/versions` to allow rollback. `code-server-manager rollback` manually switches to the previously activated version. **An executable rollback cannot reverse changes already made to user data by a newer release**; make backups before major updates.
 
@@ -133,8 +134,7 @@ The upstream GitHub Release API and archive source must be trusted. A hash downl
 ├── manager.env                    # Root-owned manager settings
 └── public-ip                      # Last certificate IP
 
-/root/code-server-credentials.txt  # Web password, root-only
-/usr/local/sbin/code-server-manager
+/usr/local/sbin/code-server-manager  # Administration and password rotation
 ```
 
 The installer never recursively clears or changes the ownership of the projects directory. All code-server processes and their extensions run as root in this configuration.
@@ -145,8 +145,9 @@ The installer never recursively clears or changes the ownership of the projects 
 - Certificates are checked daily and regenerated if their SAN IP changes or they have fewer than 30 days left; the certificate is valid for up to 825 days.
 - By default, the program listens on all IPv4 interfaces. To avoid opening a public admin endpoint, use `--bind-host 127.0.0.1` and a VPN, tunnel, or properly configured TLS reverse proxy.
 - The web password alone should not be treated as a complete defence of a root administrative interface. Never use this root-mode deployment in an untrusted multi-user environment.
-- No backup is configured. Back up `/srv/workspaces`, `/var/lib/code-server`, `/etc/code-server`, and the TLS keys to secure off-host storage.
+- No backup is configured. Back up `/srv/workspaces`, `/var/lib/code-server`, `/etc/code-server`, and the TLS keys to secure off-host storage. A config backup contains the password hash, not the plaintext password.
 - Disabling telemetry here affects code-server and VS Code preferences, not third-party software and extensions.
+- **Existing installations:** earlier revisions created `/root/code-server-credentials.txt`. After installing this updated manager, run `sudo code-server-manager reset-password` to rotate the login password and remove that legacy plaintext file. Deletion does not guarantee secure erasure from snapshots or backups.
 
 ## Development / contribution
 
@@ -172,4 +173,4 @@ The installer embeds the manager so that downloading **just one file** is enough
 
 ## License and attribution
 
-This project is independent of Coder and downloads [coder/code-server](https://github.com/coder/code-server) from official releases. The installer and management scripts in this repository are licensed under the [MIT License](LICENSE), Copyright (c) 2026 iMagicKey. The upstream code-server project and its bundled dependencies retain their own respective licenses. This repository is not affiliated with Coder.
+This independent installer is released under the [MIT License](LICENSE). It downloads [coder/code-server](https://github.com/coder/code-server) from official releases; upstream code-server retains its own license and trademarks.
